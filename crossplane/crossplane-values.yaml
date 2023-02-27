@@ -1,0 +1,6 @@
+image:
+    repository: hasheddan/crossplane-local
+    tag: v1.4.1
+    pullPolicy: Never
+args:
+    - "--registry=k8scr.default"

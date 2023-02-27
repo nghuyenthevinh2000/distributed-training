@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: k8scr
+  labels:
+    app: k8scr
+spec:
+  containers:
+    - name: k8scr
+      image: hasheddan/k8scr-distribution:latest
+      imagePullPolicy: Never
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8scr
+spec:
+  selector:
+    app: k8scr
+  ports:
+    - name: reg
+      protocol: TCP
+      port: 80
+      targetPort: 80
+    - name: other
+      protocol: TCP
+      port: 443
+      targetPort: 80
