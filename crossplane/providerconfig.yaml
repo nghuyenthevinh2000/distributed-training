@@ -1,12 +1,17 @@
----
+# AWS ProviderConfig that references the secret credentials
 apiVersion: aws.crossplane.io/v1beta1
 kind: ProviderConfig
 metadata:
-  name: default
+  name: localstack-aws
 spec:
+  endpoint:
+    hostnameImmutable: true
+    url:
+      type: Static
+      static: http://localstack.default.svc.cluster.local:4566
   credentials:
     source: Secret
     secretRef:
       namespace: default
       name: localstack-creds
-      key: creds
+      key: credentials

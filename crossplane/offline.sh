@@ -50,7 +50,7 @@ EOF
 # helm repo list
 helm install crossplane -n crossplane-system --create-namespace ./crossplane-1.4.1.tgz -f crossplane-values.yaml
 
-helm install localstack -n aws-localstack --create-namespace ./localstack-0.3.4.tgz --set startServices="s3" --set image.pullPolicy=Never
+helm install localstack ./localstack-0.3.4.tgz --set startServices="s3" --set image.pullPolicy=Never
 
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=localstack --timeout=30s
 
