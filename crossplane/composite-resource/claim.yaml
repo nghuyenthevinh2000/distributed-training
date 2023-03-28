@@ -1,0 +1,11 @@
+apiVersion: storage.example.org/v1alpha1
+kind: MyBucket
+metadata:
+  name: my-bucket-from-package
+  namespace: default
+spec:
+  compositionSelector:
+    matchLabels:
+      provider: aws
+  parameters:
+    bucketName: test-bucket-from-package

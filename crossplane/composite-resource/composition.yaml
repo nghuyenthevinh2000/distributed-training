@@ -1,0 +1,45 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xmybuckets.aws.storage.example.org
+  labels:
+    provider: aws
+spec:
+  compositeTypeRef:
+    apiVersion: storage.example.org/v1alpha1
+    kind: XMyBucket
+  resources:
+    - name: s3bucket
+      base:
+        apiVersion: s3.aws.crossplane.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            acl: public-read-write
+            locationConstraint: us-east-1
+          providerConfigRef:
+            name: localstack-aws
+      patches:
+        - fromFieldPath: "spec.parameters.bucketName"
+          toFieldPath: "metadata.name"
+          transforms:
+            - type: string
+              string:
+                fmt: "org-example-%s"
+    - name: s3bucket2
+      base:
+        apiVersion: s3.aws.crossplane.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            acl: public-read-write
+            locationConstraint: us-east-1
+          providerConfigRef:
+            name: localstack-aws
+      patches:
+        - fromFieldPath: "spec.parameters.bucketName"
+          toFieldPath: "metadata.name"
+          transforms:
+            - type: string
+              string:
+                fmt: "org-example-2-%s"
