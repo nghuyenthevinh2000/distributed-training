@@ -6,17 +6,20 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 )
 
 var (
-	nodeId    string
-	nodeIds   []string
-	nextMsgId int
-	handler   map[string]func(req Request) error
-	messages  map[float64]bool
-	neighbors []string
-	logLock   sync.Mutex
-	sendLock  sync.Mutex
+	nodeId       string
+	nodeIds      []string
+	nextMsgId    float64
+	handler      map[string]func(req Request) error
+	callbacks    map[float64]func(req Request) error
+	messages     map[float64]bool
+	neighbors    []string
+	logLock      sync.Mutex
+	sendLock     sync.Mutex
+	callbackLock sync.RWMutex
 )
 
 type Request struct {
@@ -35,6 +38,7 @@ type Response struct {
 func init() {
 	handler = make(map[string]func(req Request) error)
 	messages = make(map[float64]bool)
+	callbacks = make(map[float64]func(req Request) error)
 	on("init", onInit)
 	on("topology", onTopology)
 	on("read", onRead)
@@ -56,19 +60,34 @@ func main() {
 		}
 
 		reqBody := req.Body.(map[string]interface{})
+		var handlerFunc func(req Request) error
 
-		// check if handler exists
-		msgType := reqBody["type"].(string)
-		if _, ok := handler[msgType]; !ok {
+		// verify input
+		if _, ok := reqBody["in_reply_to"]; ok {
+			callbackLock.RLock()
+			if _, ok := callbacks[reqBody["in_reply_to"].(float64)]; ok {
+				handlerFunc = callbacks[reqBody["in_reply_to"].(float64)]
+			}
+			callbackLock.RUnlock()
+		}
+
+		if handlerFunc == nil {
+			if _, ok := handler[reqBody["type"].(string)]; ok {
+				handlerFunc = handler[reqBody["type"].(string)]
+			}
+		}
+
+		if handlerFunc == nil {
 			logSafe(fmt.Sprintf("No handler for %v", req))
 			continue
 		}
 
 		// execute handler
-		if err := handler[msgType](req); err != nil {
-			logSafe(fmt.Sprintf("Error executing handler for %v: %s", req, err))
-			continue
-		}
+		go func() {
+			if err := handlerFunc(req); err != nil {
+				logSafe(fmt.Sprintf("Error executing handler for %v: %s", req, err))
+			}
+		}()
 	}
 }
 
@@ -85,25 +104,43 @@ func onBroadcast(req Request) error {
 	reqBody := req.Body.(map[string]interface{})
 	message := reqBody["message"].(float64)
 
-	if _, ok := messages[message]; !ok {
-		messages[message] = true
-
-		for _, neighbor := range neighbors {
-			cloneBody := make(map[string]interface{})
-			for k, v := range reqBody {
-				cloneBody[k] = v
-			}
-			cloneBody["type"] = "broadcast"
-			cloneBody["message"] = message
-			delete(cloneBody, "msg_id")
-			sendSafe(neighbor, cloneBody)
-		}
-	}
-
 	if _, ok := reqBody["msg_id"]; ok {
 		delete(reqBody, "message")
 		reqBody["type"] = "broadcast_ok"
 		reply(req, reqBody)
+	}
+
+	if _, ok := messages[message]; !ok {
+		messages[message] = true
+
+		unacked := make([]string, len(neighbors))
+		copy(unacked, neighbors)
+		unacked = removeElement(unacked, req.Src)
+
+		for len(unacked) > 0 {
+			logSafe(fmt.Sprintf("Need to replicate %f to %s", message, unacked[0]))
+
+			for _, dest := range unacked {
+				clonedBody := make(map[string]interface{})
+				clonedBody["type"] = "broadcast"
+				clonedBody["message"] = message
+				rpc(dest, clonedBody, func(req Request) error {
+					logSafe(fmt.Sprintf("Received ack for %f from %s", message, req.Src))
+
+					reqBody := req.Body.(map[string]interface{})
+					if reqBody["type"] == "broadcast_ok" {
+						unacked = removeElement(unacked, req.Src)
+					}
+
+					return nil
+				})
+			}
+
+			// sleep for 1 second
+			time.Sleep(1 * time.Second)
+		}
+
+		logSafe(fmt.Sprintf("Done with message %f", message))
 	}
 
 	return nil
@@ -190,4 +227,26 @@ func convertArrInterfaceToArrString(arr []interface{}) []string {
 	}
 
 	return newArr
+}
+
+func rpc(dest string, reqBody map[string]interface{}, callbackHandler func(req Request) error) {
+	callbackLock.Lock()
+	defer callbackLock.Unlock()
+	nextMsgId++
+	msgId := nextMsgId
+	callbacks[msgId] = callbackHandler
+	reqBody["msg_id"] = msgId
+	sendSafe(dest, reqBody)
+}
+
+func removeElement(arr []string, value string) []string {
+	for i := 0; i < len(arr); i++ {
+		if arr[i] == value {
+			if i == len(arr)-1 {
+				return arr[:len(arr)-1]
+			}
+			return append(arr[:i], arr[i+1:]...)
+		}
+	}
+	return arr
 }
