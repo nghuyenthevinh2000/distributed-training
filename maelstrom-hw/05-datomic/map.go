@@ -103,7 +103,7 @@ func (m Map) transact(txs []interface{}) (Map, []interface{}) {
 			if _, ok := new_map.kv[k]; ok {
 				thunk = new_map.kv[k]
 			} else {
-				thunk = newThunk(m.m_thunk.node, m.m_thunk.id, []interface{}{}, false)
+				thunk = newThunk(m.m_thunk.node, m.m_thunk.node.newId(), []interface{}{}, false)
 			}
 
 			res_txs = append(res_txs, []interface{}{"r", k, thunk.getValue()})
