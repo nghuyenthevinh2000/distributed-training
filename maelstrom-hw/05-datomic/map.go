@@ -29,7 +29,13 @@ func (m *Map) from_json(json []interface{}) {
 
 func (m *Map) to_json() []interface{} {
 	json := []interface{}{}
-	json = append(json, m.m_thunk.id, m.m_thunk.value)
+	kv_arr := []interface{}{}
+	// update m_thunk value to reflect kv
+	for k, v := range m.kv {
+		kv_arr = append(kv_arr, []interface{}{k, v.id, v.value})
+	}
+
+	json = append(json, m.m_thunk.id, kv_arr)
 
 	return json
 }
@@ -42,7 +48,7 @@ func (m *Map) init(node *Node, id string, saved bool, value []interface{}) {
 // save map on store
 func (m *Map) save() {
 	// save id mapping of map
-	logSafe("saving map")
+	logSafe("SAVING MAP")
 
 	// save id mapping of each thunk
 	m_thunk_key := []float64{}
@@ -110,8 +116,12 @@ func (m Map) transact(txs []interface{}) (Map, []interface{}) {
 		case "append":
 			var thunk *Thunk
 
-			logSafe("append")
-			new_map.m_thunk.id = new_map.m_thunk.node.newId()
+			// update new map m_thunk id if it is the same as old one
+			if new_map.m_thunk.id == m.m_thunk.id {
+				new_map.m_thunk.id = new_map.m_thunk.node.newId()
+			}
+
+			logSafe(fmt.Sprintf("append with new map thunk id = %s", new_map.m_thunk.id))
 			if _, ok := new_map.kv[k]; ok {
 				old_thunk := new_map.kv[k]
 				thunk = newThunk(m.m_thunk.node, m.m_thunk.node.newId(), old_thunk.getValue(), false)

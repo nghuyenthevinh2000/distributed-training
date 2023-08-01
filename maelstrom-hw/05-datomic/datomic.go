@@ -211,6 +211,7 @@ var ErrorCodes = map[int]string{
 	22: "precondition failed",
 	30: "txn conflict",
 	32: "Unable to save thunk",
+	34: "Obsolete map",
 }
 
 func newRPCError(code int) RPCError {
@@ -221,7 +222,7 @@ func newRPCError(code int) RPCError {
 }
 
 func (e RPCError) LogError(value string) {
-	logSafe(fmt.Sprintf("error %v with value = %s", e.Text, value))
+	logSafe(fmt.Sprintf("error %v with value: %s", e.Text, value))
 }
 
 func (node *Node) newId() string {

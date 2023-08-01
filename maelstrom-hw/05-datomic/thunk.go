@@ -1,8 +1,9 @@
 package main
 
-import "fmt"
-
-const SVC = "lin-kv"
+import (
+	"fmt"
+	"time"
+)
 
 type Thunk struct {
 	node  *Node
@@ -23,17 +24,28 @@ func newThunk(node *Node, id string, value []interface{}, saved bool) *Thunk {
 }
 
 func (t *Thunk) getValue() []interface{} {
-	res := t.node.sync_rpc(SVC, map[string]interface{}{
-		"type": "read",
-		"key":  t.id,
-	})
+	if len(t.value) != 0 {
+		return t.value
+	}
 
-	resBody := res.Body.(map[string]interface{})
-	logSafe(fmt.Sprintf("getValue resBody: %+v", resBody))
-	if resBody["type"].(string) == "read_ok" {
-		t.value = resBody["value"].([]interface{})
-	} else {
-		newRPCError(20).LogError(resBody["text"].(string))
+	retry := 0
+
+	for retry < 10 {
+		res := t.node.sync_rpc(SVC, map[string]interface{}{
+			"type": "read",
+			"key":  t.id,
+		})
+
+		resBody := res.Body.(map[string]interface{})
+		logSafe(fmt.Sprintf("getValue resBody: %+v", resBody))
+		if resBody["type"].(string) == "read_ok" {
+			t.value = resBody["value"].([]interface{})
+			break
+		} else {
+			newRPCError(20).LogError(fmt.Sprintf("thunk failed to read id: %s", t.id))
+			time.Sleep(FALLBACK_TIME)
+			retry++
+		}
 	}
 
 	return t.value
