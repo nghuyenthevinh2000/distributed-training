@@ -25,13 +25,14 @@ func (s *State) transact(txs []interface{}) []interface{} {
 
 	write_retry := 0
 	var res_txs []interface{}
+	var new_m Map
 
 	for write_retry < 3 {
 		// retrieve map
 		m := s.read_map()
 
 		// apply txs on map
-		new_m, res_txs := m.transact(txs)
+		new_m, res_txs = m.transact(txs)
 		logSafe(fmt.Sprintf("old_m: %+v, new_m: %+v, res_txs: %+v", m.to_json(), new_m.to_json(), res_txs))
 
 		// update map
@@ -117,7 +118,7 @@ func (s *State) read_map() *Map {
 func (s *State) update_map(old_map, new_map *Map) bool {
 	// if map has no change
 	if old_map.m_thunk.id == new_map.m_thunk.id {
-		return false
+		return true
 	}
 
 	// if map has changed, save new map
