@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 )
 
@@ -12,9 +11,6 @@ const (
 	FALLBACK_TIME = 200 * time.Millisecond
 )
 
-// keep track of latest timestamp
-var newest_timestamp string
-
 type State struct {
 	node *Node
 }
@@ -23,16 +19,32 @@ func (s *State) init(node *Node) {
 	s.node = node
 }
 
+// compare and set if ROOT exists
+// write if it doesn't
 func (s *State) transact(txs []interface{}) []interface{} {
-	// retrieve map
-	m := s.read_map()
 
-	// apply txs on map
-	new_m, res_txs := m.transact(txs)
-	logSafe(fmt.Sprintf("old_m: %+v, new_m: %+v, res_txs: %+v", m.to_json(), new_m.to_json(), res_txs))
+	write_retry := 0
+	var res_txs []interface{}
 
-	// update map
-	s.update_map(m, &new_m)
+	for write_retry < 3 {
+		// retrieve map
+		m := s.read_map()
+
+		// apply txs on map
+		new_m, res_txs := m.transact(txs)
+		logSafe(fmt.Sprintf("old_m: %+v, new_m: %+v, res_txs: %+v", m.to_json(), new_m.to_json(), res_txs))
+
+		// update map
+		success := s.update_map(m, &new_m)
+
+		if success {
+			break
+		} else {
+			write_retry++
+			time.Sleep(FALLBACK_TIME)
+		}
+	}
+
 	return res_txs
 }
 
@@ -54,20 +66,7 @@ func (s *State) read_map() *Map {
 
 		// initialize map with value populated
 		if resBody["type"].(string) == "read_ok" {
-			id, time_stamp := resBody["value"].([]interface{})[0].(string), resBody["value"].([]interface{})[1].(string)
-			a, _ := strconv.ParseInt(time_stamp, 10, 64)
-			b, _ := strconv.ParseInt(newest_timestamp, 10, 64)
-
-			// check time stamp
-			logSafe(fmt.Sprintf("reading root with old timestamp: %s, new timestamp: %s", time_stamp, newest_timestamp))
-			if a < b {
-				newRPCError(34).LogError(fmt.Sprintf("failed id %s", id))
-				read_retry++
-				time.Sleep(FALLBACK_TIME)
-				continue
-			}
-
-			newest_timestamp = time_stamp
+			id := resBody["value"].(string)
 
 			m.init(s.node, id, true, []interface{}{})
 			// get the list of [k - mapping id]
@@ -88,10 +87,24 @@ func (s *State) read_map() *Map {
 		}
 	}
 
-	// in the event that have tried 3 failed times
+	// in the event that have tried all failed times
 	if read_retry == 5 {
 		new_id := s.node.newId()
 		logSafe(fmt.Sprintf("can't find mapping id, suggesting new one: %s", new_id))
+
+		// ROOT doesn't exist, write to SVC
+		reqBody := map[string]interface{}{
+			"type":  "write",
+			"key":   KEY,
+			"value": new_id,
+		}
+
+		res := s.node.sync_rpc(SVC, reqBody)
+		resBody := res.Body.(map[string]interface{})
+		if resBody["type"].(string) == "write_ok" {
+			logSafe("register map successfully")
+		}
+
 		m.init(s.node, new_id, false, []interface{}{})
 	}
 
@@ -113,19 +126,17 @@ func (s *State) update_map(old_map, new_map *Map) bool {
 	// update mapping id of map
 	logSafe("UPDATING MAPPING ID OF MAP")
 
-	current_time_stamp := time.Now().UnixNano()
-	current_time_stamp_str := strconv.FormatInt(current_time_stamp, 10)
-	newest_timestamp = current_time_stamp_str
-
 	reqBody := map[string]interface{}{
-		"type":  "write",
-		"key":   KEY,
-		"value": []interface{}{new_map.m_thunk.id, current_time_stamp_str},
+		"type": "cas",
+		"key":  KEY,
+		"from": old_map.m_thunk.id,
+		"to":   new_map.m_thunk.id,
 	}
 
 	res := s.node.sync_rpc(SVC, reqBody)
 	resBody := res.Body.(map[string]interface{})
-	if resBody["type"].(string) == "write_ok" {
+	logSafe(fmt.Sprintf("update map resBody: %+v", resBody))
+	if resBody["type"].(string) == "cas_ok" {
 		logSafe("update map successfully")
 		return true
 	}

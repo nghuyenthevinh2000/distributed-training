@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+// local Thunk cache
+var thunk_cache map[string][]interface{}
+
+func init() {
+	thunk_cache = make(map[string][]interface{})
+}
+
 type Thunk struct {
 	node  *Node
 	id    string
@@ -23,8 +30,18 @@ func newThunk(node *Node, id string, value []interface{}, saved bool) *Thunk {
 	return t
 }
 
+func (t *Thunk) cache() {
+	thunk_cache[t.id] = t.value
+}
+
 func (t *Thunk) getValue() []interface{} {
 	if len(t.value) != 0 {
+		return t.value
+	}
+
+	// retrieve from cached value
+	if v, ok := thunk_cache[t.id]; ok {
+		t.value = v
 		return t.value
 	}
 
@@ -40,6 +57,10 @@ func (t *Thunk) getValue() []interface{} {
 		logSafe(fmt.Sprintf("getValue resBody: %+v", resBody))
 		if resBody["type"].(string) == "read_ok" {
 			t.value = resBody["value"].([]interface{})
+
+			// cache value
+			t.cache()
+
 			break
 		} else {
 			newRPCError(20).LogError(fmt.Sprintf("thunk failed to read id: %s", t.id))
@@ -64,6 +85,8 @@ func (t *Thunk) save() {
 		if resBody["type"] == "write_ok" {
 			t.saved = true
 			logSafe(fmt.Sprintf("saved thunk id %s, value %+v", t.id, t.value))
+
+			t.cache()
 		} else {
 			newRPCError(32).LogError(resBody["text"].(string))
 		}
