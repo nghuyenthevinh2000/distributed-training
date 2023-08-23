@@ -12,6 +12,7 @@ func init() {
 	thunk_cache = make(map[string][]interface{})
 }
 
+// skip defines whether this thunk will get value from store
 type Thunk struct {
 	node  *Node
 	id    string
@@ -67,6 +68,10 @@ func (t *Thunk) getValue() []interface{} {
 			time.Sleep(FALLBACK_TIME)
 			retry++
 		}
+	}
+
+	if retry == 10 {
+		return nil
 	}
 
 	return t.value

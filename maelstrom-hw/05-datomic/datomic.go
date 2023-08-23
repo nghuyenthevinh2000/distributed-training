@@ -16,7 +16,7 @@ var (
 	// this lock protects callbacks resource
 	callbackLock sync.RWMutex
 	// this lock protects Id resource
-	idLock sync.Mutex
+	idLock sync.RWMutex
 
 	// id
 	id int64
@@ -231,4 +231,11 @@ func (node *Node) newId() string {
 	idLock.Unlock()
 
 	return fmt.Sprintf("%s-%d", node.nodeId, id)
+}
+
+func (node *Node) getId() int64 {
+	idLock.RLock()
+	defer idLock.RUnlock()
+
+	return id
 }

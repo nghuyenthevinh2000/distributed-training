@@ -103,16 +103,18 @@ func (m Map) transact(txs []interface{}) (Map, []interface{}) {
 		k := tx[1].(float64)
 		v := tx[2]
 
+		logSafe(fmt.Sprintf("tx: %+v", tx))
+
 		switch f {
 		case "r":
-			var thunk *Thunk
+			var value []interface{}
 			if _, ok := new_map.kv[k]; ok {
-				thunk = new_map.kv[k]
+				value = new_map.kv[k].getValue()
 			} else {
-				thunk = newThunk(m.m_thunk.node, m.m_thunk.node.newId(), []interface{}{}, false)
+				value = []interface{}{}
 			}
 
-			res_txs = append(res_txs, []interface{}{"r", k, thunk.getValue()})
+			res_txs = append(res_txs, []interface{}{"r", k, value})
 		case "append":
 			var thunk *Thunk
 
