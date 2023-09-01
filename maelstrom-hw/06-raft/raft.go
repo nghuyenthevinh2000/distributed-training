@@ -36,7 +36,7 @@ type Node struct {
 	nodeId string
 	// ids of all connected nodes
 	nodeIds   []string
-	nextMsgId float64
+	nextMsgId *SafeFloat64
 
 	handler   map[string]func(req Request) error
 	callbacks map[float64]func(req Request) error
@@ -49,6 +49,7 @@ func newNode() *Node {
 	node.handler = make(map[string]func(req Request) error)
 	node.messages = make(map[float64]bool)
 	node.callbacks = make(map[float64]func(req Request) error)
+	node.nextMsgId = newSafeFloat64(0)
 	node.on("init", node.onInit)
 
 	return node
@@ -63,7 +64,7 @@ func main() {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		logSafe(fmt.Sprintf("Received %s", line))
+		logSafe(fmt.Sprintf("Received %s at %d ms", line, time.Now().UnixMilli()))
 
 		req := Request{}
 		err := json.Unmarshal([]byte(line), &req)
@@ -141,6 +142,8 @@ func (node *Node) sendSafe(dest string, body interface{}) {
 		Body: body,
 	}
 
+	logSafe(fmt.Sprintf("Sending %v at %d ms", res, time.Now().UnixMilli()))
+
 	// send safe
 	jsonBytes, err := json.Marshal(res)
 	if err != nil {
@@ -154,12 +157,14 @@ func (node *Node) sendSafe(dest string, body interface{}) {
 }
 
 func (node *Node) rpc(dest string, reqBody map[string]interface{}, callbackHandler func(req Request) error) {
+	node.nextMsgId.increment()
+	msgId := node.nextMsgId.get()
+
 	callbackLock.Lock()
-	node.nextMsgId++
-	msgId := node.nextMsgId
 	node.callbacks[msgId] = callbackHandler
-	reqBody["msg_id"] = msgId
 	callbackLock.Unlock()
+
+	reqBody["msg_id"] = msgId
 
 	node.sendSafe(dest, reqBody)
 }

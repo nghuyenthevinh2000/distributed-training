@@ -15,12 +15,11 @@ func (m *Map) init() {
 	m.kv = make(map[float64]interface{})
 }
 
+// apply is thread - safe
 func (m *Map) apply(op map[string]interface{}) (map[string]interface{}, error) {
-	logSafe(fmt.Sprintf("trying to apply op: %v", op))
-
 	k := op["key"].(float64)
 
-	switch op["type"] {
+	switch op["type"].(string) {
 	case "read":
 		map_lock.RLock()
 		defer map_lock.RUnlock()

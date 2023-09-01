@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -25,6 +24,7 @@ func (l *Log) init(node *Node) {
 	}
 }
 
+// get entry is thread - safe
 func (l *Log) getEntry(index int) Entry {
 	log_lock.RLock()
 	defer log_lock.RUnlock()
@@ -41,8 +41,6 @@ func (l *Log) appendEntry(entries []Entry) {
 	defer log_lock.Unlock()
 
 	l.entries = append(l.entries, entries...)
-
-	logSafe(fmt.Sprintf("new entries: %v", l.entries))
 }
 
 func (l *Log) truncate(len int) {
