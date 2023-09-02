@@ -378,8 +378,10 @@ func (r *Raft) advanceStateMachine(leader_commit float64) {
 	// logSafe("start advance state machine")
 
 	for r.last_applied.get() < r.commit_index.get() {
-		r.last_applied.set(r.last_applied.get() + 1)
+		last_applied := r.last_applied.get()
+		r.last_applied.set(last_applied + 1)
 		op := r.log.getEntry(int(r.last_applied.get())).op
+		logSafe(fmt.Sprintf("last_applied (%f), commit index (%f)", r.last_applied.get(), r.commit_index.get()))
 
 		res, err := r.state_machine.apply(op)
 
