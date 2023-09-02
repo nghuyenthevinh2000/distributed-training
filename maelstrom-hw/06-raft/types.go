@@ -156,14 +156,14 @@ func (i *SafeIndex) len() int {
 	return len(i.kv)
 }
 
-func (i *SafeIndex) keys() []int {
+func (i *SafeIndex) vals() []int {
 	i.lock.RLock()
 	defer i.lock.RUnlock()
 
-	keys := make([]int, len(i.kv))
-	for _, vals := range i.kv {
-		keys = append(keys, vals)
+	vals := make([]int, 0)
+	for _, val := range i.kv {
+		vals = append(vals, val)
 	}
 
-	return keys
+	return vals
 }

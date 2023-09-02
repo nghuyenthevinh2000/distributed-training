@@ -64,7 +64,7 @@ func main() {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		logSafe(fmt.Sprintf("Received %s at %d ms", line, time.Now().UnixMilli()))
+		// logSafe(fmt.Sprintf("Received %s at %d ms", line, time.Now().UnixMilli()))
 
 		req := Request{}
 		err := json.Unmarshal([]byte(line), &req)
@@ -142,7 +142,7 @@ func (node *Node) sendSafe(dest string, body interface{}) {
 		Body: body,
 	}
 
-	logSafe(fmt.Sprintf("Sending %v at %d ms", res, time.Now().UnixMilli()))
+	// logSafe(fmt.Sprintf("Sending %v at %d ms", res, time.Now().UnixMilli()))
 
 	// send safe
 	jsonBytes, err := json.Marshal(res)
@@ -193,12 +193,15 @@ func (node *Node) brpc(reqBody map[string]interface{}, callbackHandler func(req 
 	}
 }
 
+// the ordering of reply is not needed. Therefore, it can be sent in a separate thread
 func (node *Node) reply(req Request, reqBody map[string]interface{}) {
-	body := req.Body.(map[string]interface{})
+	go func() {
+		body := req.Body.(map[string]interface{})
 
-	reqBody["in_reply_to"] = body["msg_id"]
+		reqBody["in_reply_to"] = body["msg_id"]
 
-	node.sendSafe(req.Src, reqBody)
+		node.sendSafe(req.Src, reqBody)
+	}()
 }
 
 func (node *Node) every(getInterval func() time.Duration, callback func()) {

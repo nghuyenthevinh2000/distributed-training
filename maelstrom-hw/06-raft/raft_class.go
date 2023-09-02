@@ -48,8 +48,10 @@ type Raft struct {
 	// leader state
 	commit_index *SafeFloat64
 	last_applied *SafeFloat64
-	next_index   *SafeIndex
-	match_index  *SafeIndex
+	// determine next index to send to a node
+	next_index *SafeIndex
+	// determint current log size of a node
+	match_index *SafeIndex
 }
 
 func (r *Raft) init() {
@@ -94,10 +96,11 @@ func (r *Raft) init() {
 }
 
 func (r *Raft) clientRequest(req Request) error {
-	logSafe(fmt.Sprintf("handling client request: %v", req.Body))
+	// logSafe(fmt.Sprintf("handling client request: %v", req.Body))
 
 	op := req.Body.(map[string]interface{})
 	op["src"] = req.Src
+	op["time_checkpoint"] = time.Now().UnixMilli()
 
 	msg_id := op["msg_id"].(float64)
 
@@ -112,6 +115,8 @@ func (r *Raft) clientRequest(req Request) error {
 		// logSafe(fmt.Sprintf("not leader, forwarding request: %v to leader %s", op, leader))
 
 		// if not leader, forward request to leader
+		// benchmark time to handle follower request
+		startTime := time.Now()
 		r.node.rpc(r.leader.get(), op, func(leaderReq Request) error {
 			// extract result from leader, then send to original requester
 			body := leaderReq.Body.(map[string]interface{})
@@ -119,7 +124,8 @@ func (r *Raft) clientRequest(req Request) error {
 			// logSafe(fmt.Sprintf("got result from leader: %v", body))
 			// set msg id of original request
 			op["msg_id"] = msg_id
-			logSafe(fmt.Sprintf("current request: %v", req.Body))
+
+			logSafe(fmt.Sprintf("benchmark time for handling follower request (%v): %d ms, start time: %d", op, time.Since(startTime).Milliseconds(), startTime.UnixMilli()))
 
 			r.node.reply(req, body)
 			return nil
@@ -132,6 +138,12 @@ func (r *Raft) clientRequest(req Request) error {
 	r.log.appendEntry([]Entry{
 		{term: r.term.get(), op: op},
 	})
+
+	// benchmark time to append an op to log
+	time_checkpoint := op["time_checkpoint"].(int64)
+	logSafe(fmt.Sprintf("op (%v) is appended to leader afer %d ms", op, time.Since(time.UnixMilli(time_checkpoint)).Milliseconds()))
+	// update time check point
+	op["time_checkpoint"] = time.Now().UnixMilli()
 
 	return nil
 }
@@ -345,23 +357,24 @@ func (r *Raft) matchIndex() {
 }
 
 // this is thread safe
-func (r *Raft) advanceCommitIndex() {
+func (r *Raft) advanceCommitIndex(leader_commit float64) {
 	if r.state.get() == LEADER {
-		n := r.median(r.match_index.keys())
+		vals := r.match_index.vals()
+		n := r.median(vals)
+		logSafe(fmt.Sprintf("median commit index = %v, raft commit index = %v, vals = %v, log size = %d", n, r.commit_index.get(), vals, r.log.size()))
 
 		if r.commit_index.get() < float64(n) && r.log.getEntry(n).term == r.term.get() {
-			// logSafe(fmt.Sprintf(" commit index now= %v \n", n))
+			logSafe(fmt.Sprintf("commit index now= %v \n", n))
 			r.commit_index.set(float64(n))
 		}
 	}
 
-	r.advanceStateMachine()
+	r.advanceStateMachine(leader_commit)
 }
 
 // this will return last applied index
-func (r *Raft) advanceStateMachine() {
+func (r *Raft) advanceStateMachine(leader_commit float64) {
 	// benchmark advance state machine
-	// startTime := time.Now()
 	// logSafe("start advance state machine")
 
 	for r.last_applied.get() < r.commit_index.get() {
@@ -382,11 +395,15 @@ func (r *Raft) advanceStateMachine() {
 				Src:  op["src"].(string),
 				Body: op,
 			}
+
+			time_checkpoint := op["time_checkpoint"].(int64)
+			logSafe(fmt.Sprintf("op (%v) for %f is handled after %d ms", op, leader_commit, time.Since(time.UnixMilli(time_checkpoint)).Milliseconds()))
+			// update time checkpoint
+			op["time_checkpoint"] = time.Now().UnixMilli()
+
 			r.node.reply(req, res)
 		}
 	}
-
-	// logSafe(fmt.Sprintf("Done advance state machine in %d ms", time.Since(startTime).Microseconds()))
 }
 
 // this is thread safe
@@ -423,14 +440,17 @@ func (r *Raft) replicateLog() {
 
 				// send a batch of ops to other followers
 				req := map[string]interface{}{
-					"type":           "append_entries",
-					"term":           r.term.get(),
-					"leader_id":      r.node.nodeId,
-					"prev_log_index": ni - 1,
-					"prev_log_term":  r.log.getEntry(ni - 1).term,
-					"entries":        prepare_entries,
-					"leader_commit":  r.commit_index.get(),
+					"type":            "append_entries",
+					"term":            r.term.get(),
+					"leader_id":       r.node.nodeId,
+					"prev_log_index":  ni - 1,
+					"prev_log_term":   r.log.getEntry(ni - 1).term,
+					"entries":         prepare_entries,
+					"leader_commit":   r.commit_index.get(),
+					"time_checkpoint": time.Now().UnixMilli(),
 				}
+
+				logSafe(fmt.Sprintf("send append entries (%v) to %s", req["leader_commit"], id))
 
 				r.node.rpc(
 					id,
@@ -444,14 +464,21 @@ func (r *Raft) replicateLog() {
 							r.resetStepDownDeadline()
 							// since test cases only cover 3 nodes, one more success means majority
 							if body["success"].(bool) {
-								// handling success replication to a node
+								// benchmark when append_entries is successful
+								time_checkpoint := body["time_checkpoint"].(float64)
+								leader_commit := body["leader_commit"].(float64)
+								logSafe(fmt.Sprintf("benchmark time for successfully appending entries (%v): %d ms", leader_commit, time.Since(time.UnixMilli(int64(time_checkpoint))).Milliseconds()))
+
+								// handling success replication to other nodes
+								// setting next index to send to other nodes
+								// setting match index to match with current log size of other nodes
 								next_index := r.next_index.get(req.Src)
 								match_index := r.match_index.get(req.Src)
 								r.next_index.set(req.Src, max(next_index, (ni+len(entries))))
 								r.match_index.set(req.Src, max(match_index, (ni+len(entries)-1)))
 
 								// advance commit index
-								r.advanceCommitIndex()
+								r.advanceCommitIndex(leader_commit)
 							} else {
 								// if too many failed, next_index will point to out of bound index
 								// MEGUMIN: need to determine the source of problem here
@@ -461,7 +488,6 @@ func (r *Raft) replicateLog() {
 
 							// logSafe(fmt.Sprintf("Next index = %d for id = %s", r.next_index[req.Src], req.Src))
 						}
-
 						return nil
 					},
 				)
@@ -474,6 +500,7 @@ func (r *Raft) replicateLog() {
 	}
 }
 
+// ~0ms
 func (r *Raft) appendEntries(req Request) error {
 	body := req.Body.(map[string]interface{})
 	term := body["term"].(float64)
@@ -486,9 +513,11 @@ func (r *Raft) appendEntries(req Request) error {
 	r.maybeStepDown(term)
 
 	res := map[string]interface{}{
-		"type":    "append_entries_res",
-		"term":    r.term.get(),
-		"success": false,
+		"type":            "append_entries_res",
+		"term":            r.term.get(),
+		"success":         false,
+		"leader_commit":   body["leader_commit"],
+		"time_checkpoint": body["time_checkpoint"],
 	}
 
 	// reject msg from older leader
@@ -516,9 +545,16 @@ func (r *Raft) appendEntries(req Request) error {
 
 	convertedEntries := make([]Entry, len(entries))
 	for i, entry := range entries {
+		// update time checkpoint of op
+		body := entry.(map[string]interface{})
+		time_checkpoint := body["op"].(map[string]interface{})["time_checkpoint"].(float64)
+		logSafe(fmt.Sprintf("op (%v) is replicated after %d ms", body["op"], time.Since(time.UnixMilli(int64(time_checkpoint))).Milliseconds()))
+		// update time checkpoint
+		body["op"].(map[string]interface{})["time_checkpoint"] = time.Now().UnixMilli()
+
 		convertedEntries[i] = Entry{
-			term: entry.(map[string]interface{})["term"].(float64),
-			op:   entry.(map[string]interface{})["op"].(map[string]interface{}),
+			term: body["term"].(float64),
+			op:   body["op"].(map[string]interface{}),
 		}
 	}
 	r.log.appendEntry(convertedEntries)
@@ -526,7 +562,7 @@ func (r *Raft) appendEntries(req Request) error {
 	// advance commit pointer
 	if r.commit_index.get() < body["leader_commit"].(float64) {
 		r.commit_index.set(math.Min(body["leader_commit"].(float64), float64(r.log.size())))
-		r.advanceStateMachine()
+		r.advanceStateMachine(0)
 	}
 
 	// acknowledge
